@@ -1,0 +1,75 @@
+# Nombre del workflow que aparecerá en la pestaña "Actions" de GitHub
+name: Publicar Hilo Programado
+
+on:
+  # Permite ejecutarlo manually desde la interfaz de GitHub (para pruebas)
+  workflow_dispatch:
+
+  # Lo ejecuta automáticamente según un horario programado (formato CRON)
+  schedule:
+    # Se ejecuta una vez al día a las 9:00 AM UTC
+    - cron: '0 9 * * *'
+
+jobs:
+  publicar-hilo:
+    # El tipo de máquina virtual en la que se ejecutará
+    runs-on: ubuntu-latest
+
+    # --- ¡NUEVO! ---
+    # Damos permisos al workflow para que pueda hacer "git push"
+    permissions:
+      contents: write
+
+    steps:
+      # 1. Clona el repositorio en la máquina virtual
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      # 2. Configura el entorno de Node.js
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Usamos la versión 20 de Node
+
+      # 3. Instala las dependencias (npm install)
+      - name: Instalar dependencias
+        run: npm install
+
+      # 4. Ejecuta el script de publicación
+      # (El script se modificará en el siguiente paso para borrar el job)
+      - name: Ejecutar el script post-tweet.js
+        run: node post-tweet.js
+        env:
+          # Lado izquierdo = El nombre que el script JS espera
+          # Lado derecho = El nombre de tu secret en GitHub
+          TWITTER_API_KEY: ${{ secrets.X_API_KEY }}
+          TWITTER_API_KEY_SECRET: ${{ secrets.X_API_SECRET }}
+          TWITTER_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+
+      # --- ¡NUEVO! PASO 5: Configurar Git ---
+      # (Necesario para que el commit tenga un autor)
+      - name: Configurar Git (para hacer push)
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "bot-actions@github.com"
+
+      # --- ¡NUEVO! PASO 6: Comprobar si la agenda cambió ---
+      # (Solo hacemos commit si 'post-tweet.js' modificó la agenda)
+      - name: Comprobar si la agenda ha cambiado
+        id: git_status
+        run: |
+          # Si 'agenda.yaml' está modificada, la salida de 'git status' no estará vacía.
+          if [[ -n $(git status --porcelain agenda.yaml) ]]; then
+            echo "agenda_modificada=true" >> $GITHUB_OUTPUT
+          else
+            echo "agenda_modificada=false" >> $GITHUB_OUTPUT
+          fi
+          
+      # --- ¡NUEVO! PASO 7: Subir la agenda limpia ---
+      - name: Hacer commit y push de la agenda limpia
+        if: steps.git_status.outputs.agenda_modificada == 'true'
+        run: |
+          git add agenda.yaml
+          git commit -m "Chore: Limpiar job publicado de la agenda"
+          git push

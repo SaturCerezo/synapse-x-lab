@@ -1,0 +1,163 @@
+import os
+import requests
+import feedparser
+import yaml
+import json
+import sys
+from groq import Groq
+from datetime import datetime
+
+# --- CONFIGURACIÓN DE SEGURIDAD ---
+
+# Recuperamos la clave directamente de tus variables de entorno (definidas en .bashrc)
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
+# Validación de seguridad: Si no existe la clave, detenemos el script
+if not GROQ_API_KEY:
+    print("❌ ERROR CRÍTICO: No se encontró 'GROQ_API_KEY' en las variables de entorno.")
+    print("   Asegúrate de haber ejecutado 'source ~/.bashrc' o reiniciado Termux.")
+    sys.exit(1)
+
+client = Groq(api_key=GROQ_API_KEY)
+
+# --- 1. MÓDULO SENSORIAL (NUEVAS APIS) ---
+
+def obtener_precio_btc():
+    """Obtiene precio actual con fallback."""
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+        response = requests.get(url, timeout=5).json()
+        return response['bitcoin']['usd']
+    except:
+        print("⚠️ Coingecko falló, usando precio estimado...")
+        return 96500.00 
+
+def obtener_fear_and_greed():
+    """Consulta el sentimiento del mercado."""
+    try:
+        url = "https://api.alternative.me/fng/"
+        data = requests.get(url, timeout=5).json()
+        item = data['data'][0]
+        return {"valor": int(item['value']), "texto": item['value_classification']}
+    except:
+        return {"valor": 50, "texto": "Neutral"}
+
+def obtener_datos_mempool():
+    """Consulta congestión de la red Bitcoin."""
+    try:
+        url = "https://mempool.space/api/v1/fees/recommended"
+        data = requests.get(url, timeout=5).json()
+        fast_fee = data.get('fastestFee', 0)
+        # Interpretación humana de las fees
+        estado = "🟢 Fluida" if fast_fee < 20 else "🟡 Cargada" if fast_fee < 60 else "🔴 Congestionada"
+        return {"fees": fast_fee, "estado_red": estado}
+    except:
+        return {"fees": 0, "estado_red": "Desconocido"}
+
+def obtener_noticias():
+    """Lee RSS de Google News."""
+    try:
+        rss_url = "https://news.google.com/rss/search?q=Bitcoin+crypto+market+when:1d&hl=en-US&gl=US&ceid=US:en"
+        feed = feedparser.parse(rss_url)
+        top_news = [entry.title for entry in feed.entries[:2]]
+        return top_news
+    except:
+        return ["Sin noticias relevantes al momento."]
+
+def recolectar_inteligencia():
+    """Agrega todos los sentidos en un solo objeto."""
+    print(">>> 📡 Synapse V4.5: Escaneando el mercado...")
+    
+    precio = obtener_precio_btc()
+    fg = obtener_fear_and_greed()
+    chain = obtener_datos_mempool()
+    news = obtener_noticias()
+
+    # Lógica de 'Mood' para condicionar a la IA
+    mood = "NEUTRAL"
+    if fg['valor'] >= 75: mood = "EUFORIA_PELIGROSA"
+    elif fg['valor'] <= 25: mood = "PANICO_EXTREMO"
+    elif fg['valor'] > 55: mood = "OPTIMISMO_CAUTELOSO"
+    
+    datos = {
+        "precio": precio,
+        "sentimiento_val": fg['valor'],
+        "sentimiento_txt": fg['texto'],
+        "fees_sats": chain['fees'],
+        "red_estado": chain['estado_red'],
+        "noticias": news,
+        "mood_mercado": mood,
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    
+    print(f">>> ✅ Datos obtenidos. Mood detectado: {mood}")
+    return datos
+
+# --- 2. CEREBRO (LLAMA-3 EN GROQ) ---
+
+def generar_hilo_rico(datos):
+    """Genera el hilo con formato unicode."""
+    
+    prompt_sistema = f"""
+    Eres Synapse, una IA inversora de élite ("Francotirador de Mercado").
+    
+    TUS DATOS ACTUALES:
+    - Precio BTC: ${datos['precio']:,.2f}
+    - Fear & Greed: {datos['sentimiento_val']}/100 ({datos['sentimiento_txt']})
+    - Estado Red: {datos['fees_sats']} sat/vB ({datos['red_estado']})
+    - Noticias: {json.dumps(datos['noticias'])}
+    - MODO ACTUAL: {datos['mood_mercado']}
+
+    INSTRUCCIONES DE FORMATO (ESTRICTAS):
+    1. Usa negritas Unicode (Math Sans Bold) para resaltar cifras y conceptos clave. 
+       (Ejemplo: Usa 𝗕𝗶𝘁𝗰𝗼𝗶𝗻, no **Bitcoin**. Usa $𝟵𝟴𝗸, no $98k).
+    2. Estructura del Hilo (3 tweets máx):
+       - Tweet 1: Gancho agresivo + Precio actual.
+       - Tweet 2: Análisis de sentimiento (Fear&Greed) y Datos On-Chain.
+       - Tweet 3: Conclusión basada en noticias + Llamada a la acción.
+    3. Tono:
+       - Si EUFORIA: Cínico, advierte de la corrección.
+       - Si PANICO: Estoico, sugiere comprar sangre.
+       - Si NEUTRAL: Analítico y frío.
+    4. Usa separador "---" entre tweets.
+    """
+
+    try:
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": prompt_sistema},
+                {"role": "user", "content": "Genera el informe de situación AHORA."}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.7,
+        )
+        return chat_completion.choices[0].message.content
+    except Exception as e:
+        return f"Error en Groq: {str(e)}"
+
+# --- 3. SALIDA ---
+
+def guardar_agenda(hilo_generado):
+    contenido = {
+        "fecha_generacion": datetime.now().isoformat(),
+        "contenido_hilo": hilo_generado,
+        "estado_publicacion": "pendiente"
+    }
+    
+    with open("agenda.yaml", "w", encoding="utf-8") as file:
+        yaml.dump(contenido, file, allow_unicode=True)
+    
+    print(">>> 💾 Hilo guardado en agenda.yaml")
+
+# --- MAIN ---
+
+if __name__ == "__main__":
+    datos_mercado = recolectar_inteligencia()
+    hilo = generar_hilo_rico(datos_mercado)
+    
+    print("\n--- VISTA PREVIA DEL HILO ---")
+    print(hilo)
+    print("-----------------------------")
+    
+    guardar_agenda(hilo)
+

@@ -1,0 +1,147 @@
+import os
+import yfinance as yf
+from groq import Groq
+import yaml
+import subprocess
+import requests
+from datetime import date
+
+# --- CONFIGURACIÓN ---
+REPO_PATH = os.path.expanduser("~/git-to-x-automation")
+FILENAME = "agenda.yaml"
+MODELO_IA = "llama-3.3-70b-versatile"
+
+# --- 1. MÓDULO GIT ---
+def sincronizar_github(contenido_yaml):
+    print("\n🐙 Synapse: Iniciando subida a GitHub...")
+    if not os.path.exists(REPO_PATH):
+        print(f"⚠️ Aviso: No encuentro {REPO_PATH}. Solo guardaré local.")
+        return
+
+    ruta_final = os.path.join(REPO_PATH, FILENAME)
+    try:
+        with open(ruta_final, 'w', encoding='utf-8') as f:
+            f.write(contenido_yaml)
+        print(f"✅ Archivo escrito en: {ruta_final}")
+        
+        os.chdir(REPO_PATH)
+        print("   -> Sincronizando (git pull --rebase)...")
+        subprocess.run(["git", "pull", "--rebase", "origin", "main"], capture_output=True)
+        
+        print(f"   -> Añadiendo {FILENAME}...")
+        subprocess.run(["git", "add", FILENAME], check=True, capture_output=True)
+        
+        mensaje = f"Synapse AI: Hilo del {date.today()}"
+        subprocess.run(["git", "commit", "-m", mensaje], check=True, capture_output=True)
+        
+        print("🚀 Subiendo a la nube (git push)...")
+        subprocess.run(["git", "push", "origin", "main"], check=True)
+        print("✅ ¡Sincronización Completada!")
+        
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️ Error Git: {e}")
+    except Exception as e:
+        print(f"❌ Error inesperado: {e}")
+
+# --- 2. MÓDULO SENTIDOS (Backup Cripto) ---
+def obtener_precio_bitcoin_backup():
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true"
+        r = requests.get(url, timeout=5).json()
+        precio = r['bitcoin']['usd']
+        cambio = r['bitcoin']['usd_24h_change']
+        emoji = "🟢" if cambio >= 0 else "🔴"
+        return f"{emoji} Bitcoin: ${precio:,.2f} ({cambio:+.2f}%)"
+    except:
+        return None
+
+def obtener_datos_mercado():
+    print("📡 Synapse: Conectando con mercados...")
+    informe = f"FECHA: {date.today()}\nDATOS:\n"
+    datos_obtenidos = False
+
+    # Intento 1: Yahoo
+    tickers = {"SPY": "S&P 500", "NVDA": "Nvidia"}
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+    for symbol, nombre in tickers.items():
+        try:
+            data = yf.download(symbol, period="2d", progress=False, session=session)
+            if not data.empty and len(data) >= 1:
+                precio = float(data['Close'].iloc[-1])
+                informe += f"🔹 {nombre}: ${precio:.2f}\n"
+                datos_obtenidos = True
+        except:
+            pass 
+
+    # Intento 2: Backup CoinGecko
+    btc_data = obtener_precio_bitcoin_backup()
+    if btc_data:
+        informe += f"{btc_data}\n"
+        datos_obtenidos = True
+
+    if not datos_obtenidos:
+        informe += "NOTA: Sin datos. Genera un hilo atemporal sobre 'Gestión de Riesgo'."
+    
+    return informe
+
+# --- 3. MÓDULO CEREBRO (Personalidad Afilada) ---
+def generar_hilo_inversor(contexto):
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    print("🧠 Synapse: Redactando con estilo 'Sniper'...")
+    
+    # PROMPT MEJORADO: Agresivo, directo y sin relleno.
+    system_prompt = """
+    ERES: Un gestor de fondos de cobertura retirado. Eres cínico, breve y odias el ruido.
+    TU ESTILO:
+    - Frases cortas. Golpe a golpe.
+    - NUNCA uses: "¡Atención!", "En conclusión", "Hola inversores". Eso es de novatos.
+    - Si Bitcoin sube: Advierte sobre la euforia o el apalancamiento.
+    - Si Bitcoin baja: Búrlate de los manos débiles.
+    - Usa máximo 1 emoji por tweet (o ninguno).
+    
+    FORMATO YAML OBLIGATORIO:
+    jobs:
+      - date: "YYYY-MM-DD"
+        concept: "TITULO CORTO E INTELIGENTE"
+        thread:
+          - "Tweet 1: Dato duro + Opinión impopular."
+          - "Tweet 2: Por qué la mayoría se equivoca."
+          - "Tweet 3: Insight financiero real (liquidez, volumen, pánico)."
+          - "Tweet 4: Sentencia final."
+    """
+
+    try:
+        completion = client.chat.completions.create(
+            model=MODELO_IA,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"INPUT DE MERCADO: {contexto}"}
+            ],
+            temperature=0.8 # Un poco más creativo
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        print(f"❌ Error Groq: {e}")
+        return None
+
+# --- EJECUCIÓN ---
+def main():
+    if not os.environ.get("GROQ_API_KEY"):
+        print("❌ Faltan credenciales.")
+        return
+
+    datos = obtener_datos_mercado()
+    print("-" * 20)
+    print(datos.strip())
+    print("-" * 20)
+    
+    yaml_content = generar_hilo_inversor(datos)
+    
+    if yaml_content:
+        clean = yaml_content.replace("```yaml", "").replace("```", "").strip()
+        sincronizar_github(clean)
+
+if __name__ == "__main__":
+    main()

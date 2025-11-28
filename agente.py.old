@@ -1,0 +1,170 @@
+import os
+import subprocess
+import datetime
+from groq import Groq
+from ruamel.yaml import YAML
+
+# --- Configuración ---
+AGENDA_FILE = "agenda.yaml"
+MODELO_GROQ = "llama-3.1-8b-instant"
+GITHUB_REPO_PATH = os.path.expanduser("~/git-to-x-automation") # Asegúrate que esta sea la ruta
+
+# --- Prompt para la IA (Fase 2) ---
+PROMPT_SISTEMA = """
+Eres "Synapse", un asistente de IA especializado en crear contenido viral y atractivo para X (Twitter).
+Tu trabajo es tomar un concepto simple y convertirlo en un hilo de X (Twitter) corto y potente.
+
+REGLAS DE FORMATO (OBLIGATORIO):
+1.  Debes responder ÚNICAMENTE con la estructura YAML solicitada.
+2.  NO incluyas '```yaml' ni '```' al principio o al final.
+3.  El hilo ('thread') debe ser una lista de strings.
+4.  El primer string (tweet 1) debe ser un "gancho" potente.
+5.  Los tweets deben ser cortos y fáciles de leer.
+6.  La fecha debe ser la de HOY.
+
+El usuario te dará un concepto. Genera un job YAML con este formato exacto:
+
+jobs:
+  - date: YYYY-MM-DD
+    concept: "El concepto que te dio el usuario"
+    thread:
+      - "Este es el primer tweet (el gancho)."
+      - "Este es el segundo tweet del hilo."
+      - "Este es el tercer tweet, desarrollando la idea."
+      - "Este es el tweet final (conclusión o llamada a la acción)."
+"""
+
+# --- Funciones Auxiliares ---
+
+def git_push():
+    """Ejecuta los comandos de Git para subir la agenda."""
+    try:
+        os.chdir(GITHUB_REPO_PATH)
+        print("[GIT] Sincronizando con el repositorio...")
+        subprocess.run(["git", "pull", "--rebase"], check=True)
+
+        print(f"[GIT] Añadiendo {AGENDA_FILE}...")
+        subprocess.run(["git", "add", AGENDA_FILE], check=True)
+
+        print("[GIT] Creando commit...")
+        commit_message = f"Job IA: Añadido nuevo hilo para {datetime.date.today()}"
+        subprocess.run(["git", "commit", "-m", commit_message], check=True)
+
+        print("[GIT] Subiendo cambios a GitHub...")
+        subprocess.run(["git", "push"], check=True)
+        print("[GIT] ¡Sincronización completada!")
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR GIT] Falló la operación de Git: {e}")
+        print("Es posible que no haya cambios para commitear.")
+    except FileNotFoundError:
+        print(f"[ERROR GIT] No se encontró el directorio: {GITHUB_REPO_PATH}")
+        print("Por favor, clona el repositorio o corrige la ruta GITHUB_REPO_PATH.")
+
+def limpiar_respuesta_ia(respuesta_bruta):
+    """Limpia la respuesta de Groq para que sea solo el YAML."""
+    if "```yaml" in respuesta_bruta:
+        print("[IA] Limpiando respuesta (se encontraron ```yaml)...")
+        # Extrae el contenido entre los marcadores YAML
+        partes = respuesta_bruta.split("```yaml\n")
+        if len(partes) > 1:
+            contenido = partes[1].split("\n```")[0]
+            return contenido.strip()
+
+    # Si no hay marcadores, asumimos que la respuesta es YAML directo
+    # pero buscamos la primera línea que parezca YAML ('jobs:')
+    if 'jobs:' in respuesta_bruta:
+         print("[IA] Limpiando respuesta (buscando 'jobs:')...")
+         return respuesta_bruta[respuesta_bruta.find('jobs:'):].strip()
+
+    print("[ERROR IA] La respuesta no tiene un formato YAML reconocible.")
+    return None
+
+# --- Función Principal ---
+
+def main():
+    print("--- Generador de Hilos (Proyecto Synapse-Móvil) ---")
+
+    try:
+        cliente_groq = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+        print("[INFO] Cliente de Groq inicializado.")
+    except Exception as e:
+        print(f"[ERROR] No se pudo inicializar Groq. ¿Está la GROQ_API_KEY configurada? ({e})")
+        return
+
+    # 1. Obtener concepto del usuario
+    # (Obtenemos la fecha de HOY)
+    fecha_hoy = datetime.date.today().isoformat()
+    concepto = input(f"📝 ¿Sobre qué tema creo el hilo para X? (Hoy es {fecha_hoy}): ")
+
+    # 2. Contactar a Groq
+    print(f"🤖 Contactando a Groq (IA) sobre: '{concepto}'...")
+    try:
+        completion = cliente_groq.chat.completions.create(
+            messages=[
+                {"role": "system", "content": PROMPT_SISTEMA.replace("YYYY-MM-DD", fecha_hoy)},
+                {"role": "user", "content": concepto}
+            ],
+            model=MODELO_GROQ,
+        )
+        respuesta_ia_bruta = completion.choices[0].message.content
+        print("✅ Groq ha generado el contenido.")
+    except Exception as e:
+        print(f"[ERROR IA] Falló la llamada a Groq: {e}")
+        return
+
+    # 3. Limpiar y Cargar YAML de la IA
+    respuesta_yaml_limpia = limpiar_respuesta_ia(respuesta_ia_bruta)
+    if not respuesta_yaml_limpia:
+        print("[ERROR] No se pudo extraer YAML de la respuesta de la IA. Abortando.")
+        print("Respuesta recibida:\n", respuesta_ia_bruta)
+        return
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    try:
+        nuevo_job_data = yaml.load(respuesta_yaml_limpia)
+        nuevo_job = nuevo_job_data['jobs'][0] # Extraemos el primer job de la respuesta
+        print(f"[YAML] Job de IA validado para el {nuevo_job['date']}.")
+
+        # Validación de fecha
+        if nuevo_job['date'] != fecha_hoy:
+            print(f"[ADVERTENCIA] La IA generó un job para una fecha incorrecta ({nuevo_job['date']}). Corrigiendo a {fecha_hoy}.")
+            nuevo_job['date'] = fecha_hoy
+
+    except Exception as e:
+        print(f"[ERROR YAML] La IA generó un YAML inválido: {e}")
+        print("YAML recibido:\n", respuesta_yaml_limpia)
+        return
+
+    # 4. Cargar, Actualizar y Guardar agenda.yaml
+    ruta_agenda = os.path.join(GITHUB_REPO_PATH, AGENDA_FILE)
+    try:
+        print(f"[FILE] Leyendo agenda existente: {ruta_agenda}...")
+        if os.path.exists(ruta_agenda):
+            with open(ruta_agenda, 'r') as f:
+                agenda = yaml.load(f)
+                if 'jobs' not in agenda or not agenda['jobs']:
+                    agenda = {'jobs': []} # Inicializa si está vacío o malformado
+        else:
+            print("[FILE] No se encontró agenda.yaml. Creando una nueva.")
+            agenda = {'jobs': []}
+
+        # Añadir el nuevo job
+        print(f"[FILE] Añadiendo nuevo job a la agenda...")
+        agenda['jobs'].append(nuevo_job)
+
+        # Guardar el archivo
+        with open(ruta_agenda, 'w') as f:
+            yaml.dump(agenda, f)
+        print(f"✅ Agenda actualizada con el job: {nuevo_job['concept']}")
+
+    except Exception as e:
+        print(f"[ERROR FILE] No se pudo leer o escribir en {ruta_agenda}: {e}")
+        return
+
+    # 5. Sincronizar con GitHub
+    git_push()
+    print("--- Proceso completado ---")
+
+if __name__ == "__main__":
+    main()
