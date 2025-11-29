@@ -19,7 +19,7 @@ from groq import Groq
 
 # --- CONFIGURACIÓN Y CONSTANTES ---
 ARCHIVO_LOG = "agenda.yaml"
-MODELO_IA = "llama3-8b-8192" # Modelo rápido y eficiente para Termux
+MODELO_IA = "llama-3.1-8b-instant" # Modelo rápido y eficiente para Termux
 
 # --- 1. MÓDULO DE DATOS (INPUT) ---
 def obtener_datos_entorno():
