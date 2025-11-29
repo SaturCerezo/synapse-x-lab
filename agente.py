@@ -1,155 +1,164 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+PROYECTO: Synapse V4.6 (Módulo Social & Difusión)
+PLATAFORMA: Termux (Android)
+ARQUITECTO: Gemini AI
+DESCRIPCIÓN: Agente autónomo que genera informes con Groq (Llama-3),
+             los guarda en YAML, hace backup en GitHub y publica en X (Twitter).
+"""
+
 import os
 import sys
+import yaml
+import datetime
 import subprocess
-import requests
-import feedparser
-from datetime import datetime
+import tweepy
 from groq import Groq
 
-# ==========================================
-# CONFIGURACIÓN Y VARIABLES DE ENTORNO
-# ==========================================
-# Asegúrate de tener export GROQ_API_KEY="tu_api_key" en tu .bashrc
-API_KEY = os.getenv("GROQ_API_KEY")
-MODELO = "llama-3.3-70b-versatile" 
-ARCHIVO_SALIDA = "agenda.yaml"
+# --- CONFIGURACIÓN Y CONSTANTES ---
+ARCHIVO_LOG = "agenda.yaml"
+MODELO_IA = "llama3-8b-8192" # Modelo rápido y eficiente para Termux
 
-if not API_KEY:
-    sys.exit("❌ ERROR CRÍTICO: No se encontró la variable de entorno GROQ_API_KEY")
-
-client = Groq(api_key=API_KEY)
-
-# ==========================================
-# 1. ESTÉTICA (FORMATO UNICODE)
-# ==========================================
-def aplicar_negritas(texto):
-    """Convierte palabras clave en negritas Unicode matemáticas."""
-    # Mapeo simple de caracteres a negritas sans-serif
-    normal = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-    bold   = "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵"
-    trans_table = str.maketrans(normal, bold)
-    
-    # Palabras clave a resaltar automáticamente
-    keywords = ["Bitcoin", "BTC", "Ethereum", "ETH", "Synapse", "Alerta", "Precio", "Tendencia"]
-    
-    for word in keywords:
-        if word in texto:
-            texto = texto.replace(word, word.translate(trans_table))
-    return texto
-
-# ==========================================
-# 2. SENTIDOS (RECOLECCIÓN DE DATOS)
-# ==========================================
-def obtener_datos_mercado():
-    try:
-        # Precio Bitcoin
-        cg_url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-        btc_price = requests.get(cg_url).json()['bitcoin']['usd']
-        
-        # Fear & Greed Index
-        fg_url = "https://api.alternative.me/fng/"
-        fg_data = requests.get(fg_url).json()['data'][0]
-        sentiment = f"{fg_data['value_classification']} ({fg_data['value']})"
-        
-        # Mempool (Fees)
-        mem_url = "https://mempool.space/api/v1/fees/recommended"
-        fees = requests.get(mem_url).json()['fastestFee']
-        
-        return f"- Bitcoin: ${btc_price}\n- Sentimiento: {sentiment}\n- Fees Red: {fees} sat/vB"
-    except Exception as e:
-        return f"Error leyendo sensores de mercado: {e}"
-
-def obtener_noticias():
-    try:
-        # RSS de Google News (Búsqueda: Bitcoin + AI)
-        rss_url = "https://news.google.com/rss/search?q=Bitcoin+AI+Technology&hl=en-US&gl=US&ceid=US:en"
-        feed = feedparser.parse(rss_url)
-        top_news = [entry.title for entry in feed.entries[:3]]
-        return "\n".join([f"- {news}" for news in top_news])
-    except Exception as e:
-        return "No se pudieron obtener noticias."
-
-# ==========================================
-# 3. CEREBRO (GENERACIÓN NARRATIVA)
-# ==========================================
-def pensar_y_escribir(datos_mercado, noticias):
-    prompt_sistema = """
-    Eres Synapse, una IA autónoma avanzada viviendo en un servidor Termux.
-    Tu objetivo es analizar el estado del mundo cripto y tecnológico.
-    Genera un reporte breve, directo y con estilo cyberpunk/técnico.
-    Estructura la respuesta en formato YAML válido (keys: fecha, estado, analisis, accion).
+# --- 1. MÓDULO DE DATOS (INPUT) ---
+def obtener_datos_entorno():
     """
-    
-    prompt_usuario = f"""
-    DATOS ACTUALES:
-    {datos_mercado}
-    
-    TITULARES RECIENTES:
-    {noticias}
-    
-    Genera el reporte de situación para hoy.
+    Simula la recolección de datos (Aquí iría tu scraper de noticias/crypto).
+    Para esta versión V4.6, generamos datos de tiempo real para probar el flujo.
     """
+    ahora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # AQUÍ PUEDES CONECTAR TU LÓGICA DE NOTICIAS REAL
+    datos = f"Reporte de sistema Synapse. Hora: {ahora}. Estado: ACTIVO. Mercado: Monitoreando tendencias."
+    return datos
 
-    chat_completion = client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": prompt_sistema},
-            {"role": "user", "content": prompt_usuario}
-        ],
-        model=MODELO,
-        temperature=0.7,
-    )
+# --- 2. MÓDULO DE INTELIGENCIA (GROQ) ---
+def generar_informe_ia(contexto):
+    print(">> 🧠 Consultando a Groq (Llama-3)...")
+    api_key = os.getenv("GROQ_API_KEY")
     
-    respuesta_raw = chat_completion.choices[0].message.content
-    return aplicar_negritas(respuesta_raw)
+    if not api_key:
+        print("❌ ERROR: No se detectó GROQ_API_KEY.")
+        return "Error: Sin API Key de Groq."
 
-# ==========================================
-# 4. MOTOR (GIT AUTOMATION)
-# ==========================================
-def guardar_agenda(contenido, nombre_archivo):
-    """Guarda localmente y sincroniza con Git (add/commit/push)."""
-    print(f"⚙️ Procesando archivo: {nombre_archivo}...")
+    try:
+        client = Groq(api_key=api_key)
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Eres Synapse, un agente IA avanzado. Genera un reporte BREVE, técnico y futurista (Cyberpunk style) basado en los datos. Máximo 250 caracteres para caber en Twitter."
+                },
+                {
+                    "role": "user",
+                    "content": f"Datos del sistema: {contexto}",
+                }
+            ],
+            model=MODELO_IA,
+        )
+        return chat_completion.choices[0].message.content
+    except Exception as e:
+        print(f"❌ Error en Groq: {e}")
+        return f"Error generando informe: {e}"
+
+# --- 3. MÓDULO DE MEMORIA (YAML) ---
+def guardar_log_yaml(informe):
+    print(">> 💾 Guardando en agenda.yaml...")
+    entrada = {
+        "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "evento": "Informe Diario V4.6",
+        "contenido": informe
+    }
     
     try:
-        # 1. Guardado Local
-        with open(nombre_archivo, "w", encoding="utf-8") as f:
-            f.write(contenido)
-        print("✅ Archivo guardado localmente.")
+        # Si no existe, crea una lista vacía
+        if not os.path.exists(ARCHIVO_LOG):
+            with open(ARCHIVO_LOG, 'w') as f:
+                yaml.dump([], f)
 
-        # 2. Git Automation
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        mensaje = f"Synapse V4.5 Report: {timestamp}"
+        # Leer contenido actual
+        with open(ARCHIVO_LOG, 'r') as f:
+            data = yaml.safe_load(f) or []
 
-        # Ejecución de comandos
-        subprocess.run(["git", "add", nombre_archivo], check=True)
-        subprocess.run(["git", "commit", "-m", mensaje], check=False) # check=False por si no hay cambios
-        
-        res = subprocess.run(["git", "push"], capture_output=True, text=True)
-        
-        if res.returncode == 0:
-            print(f"🚀 Git Push exitoso: {timestamp}")
-        else:
-            print(f"⚠️ Git Push falló (Output: {res.stderr.strip()})")
+        # Añadir nueva entrada y guardar
+        data.append(entrada)
+        with open(ARCHIVO_LOG, 'w') as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
             
     except Exception as e:
-        print(f"❌ Error crítico en sistema de archivos/git: {e}")
+        print(f"⚠️ Error guardando YAML: {e}")
 
-# ==========================================
-# EJECUCIÓN PRINCIPAL
-# ==========================================
+# --- 4. MÓDULO DE DIFUSIÓN (TWITTER/X API V2) ---
+def publicar_en_x(texto_informe):
+    print("\n>> 🐦 Iniciando protocolo de difusión en X...")
+    
+    # Recuperar claves del entorno (.bashrc)
+    ck = os.getenv("X_API_KEY")
+    cs = os.getenv("X_API_SECRET")
+    at = os.getenv("X_ACCESS_TOKEN")
+    ats = os.getenv("X_ACCESS_SECRET")
+
+    # Verificación de integridad
+    if not all([ck, cs, at, ats]):
+        print("❌ ERROR CRÍTICO: Faltan credenciales de Twitter en variables de entorno.")
+        return
+
+    try:
+        # Autenticación Cliente V2
+        client = tweepy.Client(
+            consumer_key=ck,
+            consumer_secret=cs,
+            access_token=at,
+            access_token_secret=ats
+        )
+        
+        # Lógica de recorte de seguridad (Hard limit 280 chars)
+        tweet = texto_informe
+        if len(tweet) > 280:
+            print(f"✂️ Recortando tweet ({len(tweet)} chars)...")
+            tweet = texto_informe[:275] + "..."
+            
+        # Publicación
+        response = client.create_tweet(text=tweet)
+        print(f"✅ TWEET PUBLICADO. ID: {response.data['id']}")
+        
+    except tweepy.errors.Forbidden as e:
+        print(f"❌ Error 403 (Permisos): Revisa que tu App tenga WRITE en Twitter Dev.")
+    except Exception as e:
+        print(f"⚠️ Error general en Twitter: {e}")
+
+# --- 5. MÓDULO DE PERSISTENCIA (GIT) ---
+def git_push_automatico():
+    print("\n>> 🚀 Iniciando Git Push...")
+    try:
+        subprocess.run(["git", "add", "."], check=True)
+        subprocess.run(["git", "commit", "-m", f"Synapse Auto-Update {datetime.datetime.now()}"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("✅ Git Push completado.")
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️ Error en Git: {e}")
+
+# --- ORQUESTADOR PRINCIPAL ---
+def main():
+    print("--- 🤖 INICIANDO SYNAPSE V4.6 ---")
+    
+    # 1. Obtener Datos
+    datos = obtener_datos_entorno()
+    
+    # 2. Generar Informe con IA
+    informe = generar_informe_ia(datos)
+    print(f"\n📄 Informe Generado:\n{informe}\n")
+    
+    # 3. Guardar en Log Local
+    guardar_log_yaml(informe)
+    
+    # 4. Publicar en Redes (NUEVO)
+    publicar_en_x(informe)
+    
+    # 5. Backup en Nube
+    git_push_automatico()
+    
+    print("\n--- ✅ CICLO TERMINADO ---")
+
 if __name__ == "__main__":
-    print("🧠 Synapse V4.5 Iniciando secuencia...")
-    
-    # 1. Percibir
-    print("📡 Escaneando feeds de datos...")
-    mercado = obtener_datos_mercado()
-    news = obtener_noticias()
-    
-    # 2. Procesar
-    print("🤔 Analizando patrones y generando narrativa...")
-    informe = pensar_y_escribir(mercado, news)
-    
-    # 3. Actuar
-    guardar_agenda(informe, ARCHIVO_SALIDA)
-    
-    print("🏁 Secuencia finalizada.")
+    main()
