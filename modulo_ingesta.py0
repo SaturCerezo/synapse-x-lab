@@ -1,0 +1,140 @@
+import requests
+import feedparser
+import json
+import time
+
+# --- CONFIGURACIÓN ---
+TIMEOUT_SEC = 15
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
+
+def calcular_termometro_precio(actual, bajo_52, alto_52):
+    if alto_52 == bajo_52: return "N/A"
+    posicion = ((actual - bajo_52) / (alto_52 - bajo_52)) * 100
+    if posicion > 90: return f"{posicion:.0f}% (EN MÁXIMOS 🔥)"
+    if posicion < 10: return f"{posicion:.0f}% (EN MÍNIMOS ❄️)"
+    return f"{posicion:.0f}% (Neutro)"
+
+def obtener_tablero_completo():
+    """Mercado, Sector y Macro"""
+    tickers = "SMR,^TNX,CCJ,URA,JPY=X"
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={tickers}"
+    try:
+        session = requests.Session()
+        resp = session.get(url, headers=HEADERS, timeout=TIMEOUT_SEC)
+        data = resp.json()['quoteResponse']['result']
+        
+        informe = []
+        nombres = {
+            "SMR": "☢️ NuScale", "^TNX": "🏛️ Bonos USA 10Y",
+            "CCJ": "🏭 Cameco", "URA": "🪨 ETF Uranio", "JPY=X": "💴 USD/JPY"
+        }
+        
+        for item in data:
+            sym = item['symbol']
+            precio = item.get('regularMarketPrice', 0)
+            pct = item.get('regularMarketChangePercent', 0)
+            
+            if sym == "SMR":
+                estado = item.get('marketState', 'UNKNOWN')
+                rango = calcular_termometro_precio(precio, item.get('fiftyTwoWeekLow',0), item.get('fiftyTwoWeekHigh',0))
+                informe.append(f"⏱️ ESTADO: {estado} | RANGO: {rango}")
+                informe.append("-" * 30)
+
+            flecha = "🟢" if pct >= 0 else "🔴"
+            informe.append(f"{flecha} {nombres.get(sym, sym)}: {precio:.2f} ({pct:+.2f}%)")
+            
+        return "\n".join(informe)
+    except Exception as e: return f"[!] Error Mercados: {e}"
+
+def obtener_ballenas_institucionales():
+    """
+    NUEVO V5.2: Busca el 'Smart Money'.
+    Consulta quién es el dueño de la empresa (Instituciones vs Insiders).
+    """
+    url = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/SMR?modules=majorHoldersBreakdown,institutionOwnership"
+    
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT_SEC)
+        data = resp.json()['quoteSummary']['result'][0]
+        
+        # 1. Datos Duros (% de posesión)
+        holders = data['majorHoldersBreakdown']
+        pct_insiders = holders['insidersPercentHeld']['fmt']
+        pct_institutions = holders['institutionsPercentHeld']['fmt']
+        
+        # 2. Análisis Rápido
+        analisis = ""
+        val_inst = float(pct_institutions.replace('%', ''))
+        if val_inst > 60: analisis = "(RESPALDO SÓLIDO: Los fondos controlan la empresa)"
+        elif val_inst > 40: analisis = "(RESPALDO MODERADO)"
+        else: analisis = "(ESPECULATIVA: Poco interés institucional aún)"
+        
+        # 3. Top Owners (¿Está Vanguard?)
+        top_owners = data['institutionOwnership']['ownershipList']
+        nombres_top = [item['organization'] for item in top_owners[:3]] # Top 3 fondos
+        
+        reporte = (
+            f"🏛️ INSTITUCIONALES: {pct_institutions} {analisis}\n"
+            f"👤 INSIDERS (Dueños/Empleados): {pct_insiders}\n"
+            f"🏆 TOP HOLDERS: {', '.join(nombres_top)}"
+        )
+        return reporte
+
+    except Exception as e:
+        return f"[!] Datos institucionales no disponibles: {e}"
+
+def obtener_agenda_bancos_centrales():
+    """Busca pronósticos de tasas y noticias de Vanguard/BlackRock"""
+    queries = [
+        ("MACRO (Fed/Japón)", "Federal+Reserve+interest+rate+decision+Bank+of+Japan"),
+        ("BALLENAS (SMR)", "NuScale+stock+Vanguard+BlackRock+ownership+buy")
+    ]
+    agenda = []
+    for entidad, q in queries:
+        try:
+            url = f"https://news.google.com/rss/search?q={q}+when:7d&hl=en-US&gl=US&ceid=US:en"
+            feed = feedparser.parse(url)
+            if feed.entries:
+                agenda.append(f"📰 {entidad}: {feed.entries[0].title}")
+        except: pass
+    return "\n".join(agenda) if agenda else "(Sin noticias de fondos)"
+
+def obtener_discusion_social():
+    """Filtro Reddit"""
+    url = "https://www.reddit.com/search.json?q=NuScale+SMR+stock&sort=new&limit=5"
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT_SEC)
+        if resp.status_code != 200: return "(Reddit Offline)"
+        posts = resp.json()['data']['children']
+        validos = [f"- r/{p['data']['subreddit']}: {p['data']['title']}" 
+                   for p in posts 
+                   if any(k in (p['data']['title']+p['data']['subreddit']).lower() 
+                   for k in ['stock','nuclear','price'])] [:2]
+        return "\n".join(validos)
+    except: return "(Error Reddit)"
+
+def obtener_datos_reales():
+    """FACADE V5.2 WHALE WATCHER"""
+    print("... Rastreando el dinero inteligente (Smart Money) ...")
+    
+    mercado = obtener_tablero_completo()
+    institucional = obtener_ballenas_institucionales()
+    noticias = obtener_agenda_bancos_centrales()
+    social = obtener_discusion_social()
+    
+    return (
+        f"=== INFORME DE INTELIGENCIA V5.2 ===\n"
+        f"{mercado}\n"
+        f"------------------------------------\n"
+        f"{institucional}\n"
+        f"------------------------------------\n"
+        f"🔮 CONTEXTO (Macro & Fondos):\n{noticias}\n"
+        f"------------------------------------\n"
+        f"🗣️ RETAIL:\n{social}"
+    )
+
+if __name__ == "__main__":
+    print(obtener_datos_reales())
