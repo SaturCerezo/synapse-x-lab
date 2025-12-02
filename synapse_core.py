@@ -16,7 +16,7 @@ import subprocess
 
 import tweepy
 from groq import Groq
-
+from typing import Optional
 # --- NUEVO IMPORT V5.6 (El Ojo que todo lo ve, con backoff + caché) ---
 # --- NUEVO IMPORT V5.6 (El Ojo que todo lo ve, HTML scraper + caché) ---
 try:
@@ -27,7 +27,7 @@ except ImportError:
         return "Error: Módulo de datos no encontrado."
 # --- CONFIGURACIÓN Y CONSTANTES ---
 ARCHIVO_LOG = "agenda.yaml"
-MODELO_IA = "llama-3.1-70b-versatile"  # Modelo grande para análisis
+MODELO_IA = "llama-3.3-70b-versatile"  # Modelo grande para análisis
 
 
 # --- 0. VALIDACIÓN BÁSICA DE ENTORNO ---
@@ -61,14 +61,13 @@ def validar_entorno():
 
 
 # --- 1. MÓDULO DE INTELIGENCIA (GROQ) ---
-
-def generar_informe_ia(contexto_mercado: str) -> str:
+def generar_informe_ia(contexto_mercado: str) -> Optional[str]:
     print(">> 🧠 Synapse procesando datos de mercado con Llama-3...")
     api_key = os.getenv("GROQ_API_KEY")
 
     if not api_key:
         print("❌ ERROR: No se detectó GROQ_API_KEY.")
-        return "Error: Sin API Key de Groq."
+        return None
 
     system_prompt = (
         "Eres Synapse, una IA de análisis financiero de élite. "
@@ -102,8 +101,7 @@ def generar_informe_ia(contexto_mercado: str) -> str:
         return chat_completion.choices[0].message.content.strip()
     except Exception as e:
         print(f"❌ Error en Groq: {e}")
-        return f"Error generando informe: {e}"
-
+        return None
 
 # --- 2. MÓDULO DE MEMORIA (YAML) ---
 
@@ -200,7 +198,7 @@ def main():
 
     validar_entorno()
 
-    # 1. OBTENER DATOS REALES (Módulo Ingesta V5.6)
+    # 1. OBTENER DATOS REALES
     try:
         datos_mercado = obtener_datos_reales()
     except Exception as e:
@@ -209,20 +207,22 @@ def main():
 
     # 2. PROCESAR CON IA
     informe_final = generar_informe_ia(datos_mercado)
-    print("\n🧾 Informe generado por Synapse:")
-    print(informe_final)
 
-    # 3. GUARDAR EN MEMORIA LOCAL
-    guardar_log_yaml(informe_final)
+    if informe_final is None:
+        print("\n🧾 Synapse no ha podido generar informe (fallo en Groq).")
+        guardar_log_yaml("Error: no se pudo generar informe (Groq).")
+        # No publicar en X si falla la IA
+    else:
+        print("\n🧾 Informe generado por Synapse:")
+        print(informe_final)
 
-    # 4. PUBLICAR AL MUNDO
-    publicar_en_x(informe_final)
+        guardar_log_yaml(informe_final)
+        publicar_en_x(informe_final)
 
-    # 5. BACKUP
+    # 3. BACKUP GIT
     git_push_automatico()
 
     print("\n--- ✅ PROTOCOLO FINALIZADO ---")
-
 
 if __name__ == "__main__":
     main()
