@@ -2,10 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-PROYECTO: Synapse V4.7 (Módulo Financiero Real)
+PROYECTO: Synapse V4.7 (Financial Core + Ingesta V5.6)
 PLATAFORMA: Termux (Android)
-DESCRIPCIÓN: Agente autónomo que lee el mercado real (Yahoo/RSS),
-             analiza con Groq, guarda en YAML, publica en X y hace backup en GitHub.
+DESCRIPCIÓN:
+  Agente autónomo que:
+    - Lee el mercado real (Yahoo HTML scraper + RSS) vía modulo_ingesta1.
+    - Analiza con Groq (Llama 3.3 70B).
+    - Guarda el análisis en YAML.
+    - Publica en X (Twitter).
+    - Hace backup automático con Git.
 """
 
 import os
@@ -13,21 +18,24 @@ import sys
 import yaml
 import datetime
 import subprocess
+from typing import Optional
 
 import tweepy
 from groq import Groq
-from typing import Optional
-# --- NUEVO IMPORT V5.6 (El Ojo que todo lo ve, con backoff + caché) ---
-# --- NUEVO IMPORT V5.6 (El Ojo que todo lo ve, HTML scraper + caché) ---
+
+# --- IMPORT DE INGESTA (El Ojo que todo lo ve, HTML scraper + caché) ---
 try:
     from modulo_ingesta1 import obtener_datos_reales
 except ImportError:
     print("⚠️ ADVERTENCIA: No se encontró modulo_ingesta1.py. Usando modo simulación.")
+
     def obtener_datos_reales():
         return "Error: Módulo de datos no encontrado."
+
+
 # --- CONFIGURACIÓN Y CONSTANTES ---
 ARCHIVO_LOG = "agenda.yaml"
-MODELO_IA = "llama-3.3-70b-versatile"  # Modelo grande para análisis
+MODELO_IA = "llama-3.3-70b-versatile"  # Modelo Groq actual para análisis
 
 
 # --- 0. VALIDACIÓN BÁSICA DE ENTORNO ---
@@ -35,7 +43,7 @@ MODELO_IA = "llama-3.3-70b-versatile"  # Modelo grande para análisis
 def validar_entorno():
     """
     Comprueba que existan las variables de entorno críticas.
-    Si falta algo, salimos pronto.
+    Si falta algo, salimos pronto para no gastar llamadas a APIs.
     """
     errores = []
 
@@ -56,12 +64,17 @@ def validar_entorno():
         print("❌ ERROR: Faltan variables de entorno críticas:")
         for v in errores:
             print(f"   - {v}")
-        print("   Revisa tu .bashrc / .profile en Termux.")
+        print("   Revisa tu ~/.bashrc o ~/.profile en Termux.")
         sys.exit(1)
 
 
 # --- 1. MÓDULO DE INTELIGENCIA (GROQ) ---
+
 def generar_informe_ia(contexto_mercado: str) -> Optional[str]:
+    """
+    Llama a Groq para generar el tweet-análisis.
+    Si algo falla (API key, modelo, red…), devuelve None.
+    """
     print(">> 🧠 Synapse procesando datos de mercado con Llama-3...")
     api_key = os.getenv("GROQ_API_KEY")
 
@@ -103,9 +116,13 @@ def generar_informe_ia(contexto_mercado: str) -> Optional[str]:
         print(f"❌ Error en Groq: {e}")
         return None
 
+
 # --- 2. MÓDULO DE MEMORIA (YAML) ---
 
 def guardar_log_yaml(informe: str) -> None:
+    """
+    Añade una entrada al log YAML (agenda.yaml) con timestamp e informe.
+    """
     print(">> 💾 Archivando análisis en agenda.yaml...")
     entrada = {
         "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -132,6 +149,9 @@ def guardar_log_yaml(informe: str) -> None:
 # --- 3. MÓDULO DE DIFUSIÓN (TWITTER/X API V2) ---
 
 def publicar_en_x(texto_informe: str) -> None:
+    """
+    Publica el informe en X (Twitter) usando la API v2 de Tweepy.
+    """
     print("\n>> 🐦 Conectando con Neural Link (Twitter X)...")
 
     ck = os.getenv("X_API_KEY")
@@ -170,6 +190,10 @@ def publicar_en_x(texto_informe: str) -> None:
 # --- 4. MÓDULO DE PERSISTENCIA (GIT) ---
 
 def git_push_automatico() -> None:
+    """
+    Hace git add/commit/push solo si hay cambios pendientes.
+    Evita ruido y errores cuando no hay nada nuevo.
+    """
     print("\n>> 🚀 Sincronizando memoria con la Nube (Git)...")
     try:
         status = subprocess.run(
@@ -196,6 +220,7 @@ def git_push_automatico() -> None:
 def main():
     print("--- ☢️ INICIANDO SYNAPSE V4.7 (FINANCIAL CORE) ---")
 
+    # 0. Validar entorno
     validar_entorno()
 
     # 1. OBTENER DATOS REALES
@@ -224,5 +249,7 @@ def main():
 
     print("\n--- ✅ PROTOCOLO FINALIZADO ---")
 
+
 if __name__ == "__main__":
     main()
+
